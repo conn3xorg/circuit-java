@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Conn3x
+        env: &gh
+          GH_TOKEN: ${{ github.token }}
+        run: &install |
+          tag=$(gh release view -R conn3xorg/conn3x --json tagName -q .tagName)
+          file="conn3x_${tag#v}_linux_amd64.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -sSfLO "https://github.com/conn3xorg/conn3x/releases/download/$tag/$file"
+          curl -sSfLO "https://github.com/conn3xorg/conn3x/releases/download/$tag/checksums.txt"
+          grep " $file\$" checksums.txt | sha256sum -c -
+          mkdir -p bin && tar -xzf "$file" -C bin conn3x
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - run: conn3x version
+      - run: conn3x fmt -check -recursive
+      - name: Validate
+        run: conn3x init -backend=false && conn3x validate
+      - name: Validate the example
+        working-directory: examples/local
+        run: conn3x init -backend=false && conn3x validate
+
+  e2e:
+    needs: validate
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [rocky10, fedora45, ubuntu2404, debian13]
+        java_source: [distribution, temurin]
+    name: e2e (${{ matrix.distro }}, ${{ matrix.java_source }})
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The test host images live in the Conn3x repo.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: conn3xorg/conn3x
+          ref: main
+          path: conn3x
+          persist-credentials: false
+          sparse-checkout: test/images
+      - name: Install Conn3x
+        env: *gh
+        run: *install
+      - name: Start the ${{ matrix.distro }} host
+        working-directory: examples/local
+        env:
+          CONTAINERFILE: ${{ github.workspace }}/conn3x/test/images/${{ matrix.distro }}/Containerfile
+          PODMAN: sudo podman
+        run: ./up.sh
+      - name: Apply, then plan again with no changes
+        working-directory: examples/local
+        env:
+          TF_VAR_java_source: ${{ matrix.java_source }}
+        run: |
+          conn3x init
+          conn3x apply -auto-approve
+          conn3x plan -detailed-exitcode
+      # A login shell reads /etc/profile.d, where JAVA_HOME is set.
+      - name: Check java is 25, and JAVA_HOME points at the same Java with javac
+        run: |
+          sudo podman exec circuit-java bash -lc '
+            set -eux
+            java -version 2>&1 | grep "version \"25"
+            [ -n "$JAVA_HOME" ]
+            [ "$(readlink -f "$JAVA_HOME/bin/java")" = "$(readlink -f "$(command -v java)")" ]
+            "$JAVA_HOME/bin/javac" -version 2>&1 | grep "^javac 25"
+          '
+      # Both stay installed. Temurin's packages register with a higher
+      # alternatives priority than OpenJDK's, so switching back checks the
+      # circuit's manual setting wins.
+      - name: Switch to Temurin and back, and check java follows each time
+        if: matrix.java_source == 'distribution'
+        working-directory: examples/local
+        run: |
+          # Prints the vendor line of java -version, after checking
+          # JAVA_HOME and java are the same Java.
+          vendor() {
+            sudo podman exec -i circuit-java bash -l -s <<'EOF'
+          set -eu
+          [ "$(readlink -f "$JAVA_HOME/bin/java")" = "$(readlink -f "$(command -v java)")" ]
+          java -version 2>&1 | sed -n 2p
+          EOF
+          }
+          conn3x apply -auto-approve -var java_source=temurin
+          conn3x plan -detailed-exitcode -var java_source=temurin
+          v=$(vendor) && echo "$v" && [ -z "${v##*Temurin*}" ]
+          conn3x apply -auto-approve -var java_source=distribution
+          conn3x plan -detailed-exitcode -var java_source=distribution
+          v=$(vendor) && echo "$v" && [ -n "${v##*Temurin*}" ]
+      - name: Clean up
+        if: always()
+        working-directory: examples/local
+        env:
+          PODMAN: sudo podman
+        run: ./down.sh
