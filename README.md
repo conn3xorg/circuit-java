@@ -10,7 +10,7 @@ It then points `java` at that release through the alternatives system and export
 
 ```hcl
 module "java" {
-  source = "github.com/conn3xorg/circuit-java?ref=v0.1.0"
+  source = "github.com/conn3xorg/circuit-java?ref=v0.1.1"
 
   hosts                = { app1 = "203.0.113.10", app2 = "203.0.113.11" }
   ssh_private_key_file = "~/.ssh/id_ed25519"
@@ -25,7 +25,7 @@ For a build host, set `jdk = true` to get `javac` and the rest of the JDK. For T
 
 ```hcl
 module "java" {
-  source = "github.com/conn3xorg/circuit-java?ref=v0.1.0"
+  source = "github.com/conn3xorg/circuit-java?ref=v0.1.1"
 
   hosts       = { ci1 = "203.0.113.20" }
   java_source = "temurin"
@@ -68,7 +68,7 @@ To install a second release without taking over `java`, use another module with 
 
 ```hcl
 module "java17" {
-  source = "github.com/conn3xorg/circuit-java?ref=v0.1.0"
+  source = "github.com/conn3xorg/circuit-java?ref=v0.1.1"
 
   hosts        = { app1 = "203.0.113.10" }
   java_version = 17
@@ -84,7 +84,7 @@ A circuit that runs a Java service can depend on this one and use `java_home` ra
 
 ```hcl
 module "java" {
-  source = "github.com/conn3xorg/circuit-java?ref=v0.1.0"
+  source = "github.com/conn3xorg/circuit-java?ref=v0.1.1"
   hosts  = { app1 = "203.0.113.10" }
 }
 
