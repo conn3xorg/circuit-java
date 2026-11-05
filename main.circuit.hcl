@@ -92,8 +92,7 @@ circuit "temurin" {
   }
 
   # Adoptium builds one rpm repository for Fedora and one for RHEL, which
-  # Rocky Linux, AlmaLinux and CentOS Stream use too. Its signing key has
-  # no expiry date.
+  # Rocky Linux and AlmaLinux use too. Its signing key has no expiry date.
   step "repo" {
     repository {
       name   = "adoptium"
